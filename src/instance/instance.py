@@ -6,13 +6,15 @@ from collections import Counter
 import multiprocessing as mp
 import time
 
-def build_instance(instance_word:str):
-    return Instance(instance_word)
+def build_instance(instance_tuple: tuple[str, int]):
+    instance_word, instance_count = instance_tuple
+    return Instance(instance_word, instance_count)
 
 class Instance:
-    def __init__(self, instance_word: str):
+    def __init__(self, instance_word: str, instance_count: int):
         self.word = instance_word
         self.tokens = []
+        self.instance_count = instance_count
         
         # initialize token
         for i, subword in enumerate(instance_word):
@@ -50,7 +52,7 @@ class Instance:
             if merge_rule not in self.token_bigram_merge_rules_counter:
                 self.token_bigram_merge_rules_counter[merge_rule] = 0
 
-            self.token_bigram_merge_rules_counter[merge_rule] += 1
+            self.token_bigram_merge_rules_counter[merge_rule] += 1 * self.instance_count
     
     def get_token_list(self):
         return self.tokens
@@ -67,6 +69,7 @@ class InstanceManager:
         self.token_bigram_merge_rules_counter = Counter()
 
     def build_instances(self, instance_words: list[str], is_mp_needed: bool = False):
+        _instance_words = set(instance_words)
         if is_mp_needed:
             num_proc = max(mp.cpu_count() - 1, 1)
             total = len(instance_words)
@@ -110,13 +113,27 @@ class InstanceManager:
                     self.subword_to_instance[subword].append(instance)
                 self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
 
-
-
 if __name__ == "__main__":
-    test_word = "huggywoggy"
-    instance = Instance(test_word)
-    print(f"Merge rule candidates for the word '{test_word}':")
+    ## test 1
+    # test_word = "huggywoggy"
+    # instance = Instance(test_word)
+    # print(f"Merge rule candidates for the word '{test_word}':")
     
-    # 후보들을 출력합니다. MergeRule 클래스에 __str__이나 __repr__이 정의되어 있다고 가정합니다.
-    for rule in sorted(list(instance.token_merge_rules_candidates)):
-        print(rule)
+    # # 후보들을 출력합니다. MergeRule 클래스에 __str__이나 __repr__이 정의되어 있다고 가정합니다.
+    # for rule in sorted(list(instance.token_merge_rules_candidates)):
+    #     print(rule)
+
+    ## test 2
+    from src.util.util import load_corpus
+    import os
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    print("현재 프로그램의 폴더 경로:", current_dir)
+    
+    corpus_path = os.path.join(current_dir, "..", "..", "data", "pg100.txt")
+    corpus = load_corpus(corpus_path)
+    
+    from src.token.tokenizer import pre_tokenize
+    tokenized_instances = pre_tokenize(corpus)
+
+    instance_manager = InstanceManager(tokenized_instances)
+    instance_manager.build_instances(tokenized_instances, is_mp_needed=True)
