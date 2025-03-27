@@ -15,3 +15,6 @@ class MergeRule(Token):
     
     def __eq__(self, other):
         return self.token1 == other.token1 and self.token2 == other.token2
+
+    def __lt__(self, other):
+        return self.token_string < other.token_string
