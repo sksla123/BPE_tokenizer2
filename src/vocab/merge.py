@@ -4,6 +4,8 @@ class MergeRule(Token):
     def __init__(self, token1: Token, token2: Token):
         super().__init__(token1.token_string + token2.token_string, token1.is_sub)
         
+        self.token = Token(token1.token_string + token2.token_string, token1.is_sub)
+        
         self.token1 = token1
         self.token2 = token2
 

@@ -3,18 +3,36 @@ from src.vocab.vocab import Vocabulary
 from src.vocab.merge import MergeRule
 from src.instance.instance import InstanceManager
 from src.token.tokenizer import pre_tokenize
+from src.util.util import load_corpus
 from collections import Counter
 import time
 
 class BPE:
-    def __init__(self, vocab_size: int):
-        self.vocab_size = vocab_size
+    def __init__(self, config_data: dict):
+        self.config_data = config_data
+        self.train_corpus_path = config_data.get("train_corpus_path", None)
+        self.max_vocab_size = config_data.get("max_vocab", None)
+        self.vocab_save_path = config_data.get("vocab_output_path", None)
+        self.infer_vocab_path = config_data.get("infer_vocab_path", None)
+        self.input_data_path = config_data.get("input_data_path", None)
+        self.tokenized_result_path = config_data.get("tokenized_result_path", None)
+        
+        self.corpus = ""
+        self.pre_tokenized_corpus = None
         self.vocab = Vocabulary()
-        self.instance_manager = None
 
-    def init_instance_manager(self, tokenized_instances: list[list[Token]]):
+        self.instance_manager = InstanceManager()
     
-    def train(self, corpus: str, is_mp_needed: bool = False):
+    def initialize_vocab(self):
+        tokens = set()
+
+        for instance in self.instance_manager.instance_word_to_instance.values():
+            tokens = tokens | set(instance.tokens)
+
+        for token in tokens:
+            self.vocab.add_token(token)
+
+    def train(self):
         """
         BPE 알고리즘을 사용하여 어휘를 학습합니다.
         
@@ -25,20 +43,13 @@ class BPE:
         print("Starting BPE training...")
         start_time = time.time()
         
-        # 1. 코퍼스를 단어 단위로 분리
-        print("Pre-tokenizing corpus...")
-        tokenized_instances = pre_tokenize(corpus)
-        print(f"Pre-tokenized {len(tokenized_instances)} instances")
+        self.corpus = load_corpus(self.train_corpus_path)
+        self.pre_tokenized_corpus = pre_tokenize(self.corpus)
+
+        self.instance_manager.build_instances(self.pre_tokenized_corpus, is_mp_needed=False)
         
-        # 2. 인스턴스 매니저 초기화 및 인스턴스 생성
-        print("Building instances...")
-        self.instance_manager = InstanceManager(tokenized_instances)
-        self.instance_manager.build_instances(tokenized_instances, is_mp_needed)
-        
-        # 3. BPE 병합 규칙 학습
-        print("Learning merge rules...")
-        current_vocab_size = len(self.vocab.word_tokens) + len(self.vocab.sub_tokens)
-        num_merges = self.vocab_size - current_vocab_size
+        self.initialize_vocab()
+        current_vocab_size = self.vocab.get_vocab_size()
         
         for i in range(num_merges):
             # 가장 빈도가 높은 bigram 쌍 찾기

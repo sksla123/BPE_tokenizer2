@@ -77,13 +77,12 @@ class Instance:
         self.update_token_bigram_merge_rules() ### 현재 토큰 기반으로 생성 가능한 bigram 쌍을 검색하고 카운터 업데이트
     
     def init_subwords_candidates(self):
-        self.token_candidates_pool = set()
+        self.token_candidates_pool = set(self.tokens)
         word_len = len(self.word)
-        # 모든 가능한 연속된 substring 후보 생성 (길이 2 이상)
+
         for subword_len in range(2, word_len + 1):
             for start_idx in range(word_len - subword_len + 1):
                 substring = self.word[start_idx:start_idx+subword_len]
-                # 시작 인덱스가 0이면 단어의 첫 토큰, 아니면 subword로 취급
                 candidate_token = Token(substring, is_sub=(start_idx != 0))
                 self.token_candidates_pool.add(candidate_token)
 
@@ -106,13 +105,25 @@ class Instance:
     def get_token_bigram_merge_rules_counter(self):
         return self.token_bigram_merge_rules_counter
 
+    def tokenize(self, vocab: Vocabulary):
+        candidate_tokens = self.token_candidates_pool
+
+        for token in candidate_tokens:
+            if token.token in vocab:
+                self.tokens.append(token)
+
+        return self.tokens
+
+
 class InstanceManager:
-    def __init__(self, instance_words: list[str]):
+    def __init__(self):
         self.instance_word_to_instance = {}
         self.subword_to_instance = {} ### 역인덱싱용
         
-        ## 전체 merge rule 카운터
+        ## 전체 merge rule 카운터 (이 merge rule은 merge rule 후보군 입니다.)
         self.token_bigram_merge_rules_counter = Counter()
+
+        self.tokenize_available = True
 
     def build_instances(self, instance_words: list[str], is_mp_needed: bool = False):
         instance_words_counter = Counter(instance_words)
@@ -141,10 +152,14 @@ class InstanceManager:
                         if subword not in self.subword_to_instance:
                             self.subword_to_instance[subword] = []
                         self.subword_to_instance[subword].append(instance)
+
                     self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
+                    for merge_rule in instance.token_bigram_merge_rules:
+                        if merge_rule not in self.token_bigram_merge_rules_to_instance:
+                            self.token_bigram_merge_rules_to_instance[merge_rule] = []
+                        self.token_bigram_merge_rules_to_instance[merge_rule].append(instance)
                     processed_count += 1
-                    if processed_count % 1000 == 0:  # 1000개마다 진행 상황 출력
-                        print(f"\rProcessing results: {processed_count}/{len(results)}", end="", flush=True)
+                    print(f"\rProcessing results: {processed_count}/{len(results)}", end="", flush=True)
                 print("\n")
                 
                 end_time = time.time()
@@ -160,7 +175,6 @@ class InstanceManager:
             try:
                 # 단일 프로세스로 처리
                 processed = 0
-                last_print_time = start_time
                 
                 for instance_word, instance_count in instance_words_counter.items():
                     instance = Instance(instance_word, instance_count)
@@ -174,12 +188,11 @@ class InstanceManager:
                     
                     # 진행 상황 출력
                     processed += 1
-                    current_time = time.time()
-                    if current_time - last_print_time >= 2:
+                    if processed % 10000 == 0:
+                        current_time = time.time()
                         elapsed = current_time - start_time
                         print("\033[2K", end="\r")  # 현재 라인 지우기
                         print(f"Progress: {processed}/{total} instances built. Elapsed: {elapsed:.2f} seconds", end="\r")
-                        last_print_time = current_time
                 
                 print("\n")  # 마지막 출력 후 줄바꿈
                 end_time = time.time()
@@ -189,6 +202,14 @@ class InstanceManager:
                 print("\nReceived keyboard interrupt. Terminating process...")
                 print("Process terminated.")
                 raise  # KeyboardInterrupt를 다시 발생시켜 프로그램 종료
+        
+    def update_vocab(self, vocab: Vocabulary):
+        for instance in self.instance_word_to_instance.values():
+            for token in instance.tokens:
+                vocab.add_token(token)
+    
+    def tokenize_instance(self, instance:Instance, vocab: Vocabulary):
+        pass
 
 if __name__ == "__main__":
     ## test 1
@@ -213,9 +234,17 @@ if __name__ == "__main__":
     print(f"pre tokenized instance 개수: {len(tokenized_instances)}")
     print(f"set 적용 후 instance 개수: {len(set(tokenized_instances))}")
 
-    instance_manager = InstanceManager(tokenized_instances)
+    instance_manager = InstanceManager()
     # 멀티 프로세싱 사용
     # instance_manager.build_instances(tokenized_instances, is_mp_needed=True)
     # 멀티 프로세싱 사용 안함 
     ### 비교실험 해봤는데 70000개 기준 멀티 프로세싱 사용 안할때 더 빠름
     instance_manager.build_instances(tokenized_instances, is_mp_needed=False)
+
+    instance = instance_manager.instance_word_to_instance["the"]
+
+    print(instance.word)
+    print(",".join([str(token) for token in instance.token_candidates_pool]))
+    print("--------------------------------")
+    for merge_rule, count in instance.token_bigram_merge_rules_counter.items():
+        print(f"{str(merge_rule)}: {count}")
