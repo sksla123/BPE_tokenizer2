@@ -150,7 +150,7 @@ if __name__ == "__main__":
     # }
     # bpe = BPE(config_data)
     # bpe.train()
-    # bpe.vocab.save_vocab(bpe.vocab_save_path)
+    # bpe.save_vocab(bpe.vocab_save_path)
 
 
     # print("vocab size:", bpe.vocab.get_vocab_size())
