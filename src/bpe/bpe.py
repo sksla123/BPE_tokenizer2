@@ -109,9 +109,8 @@ class BPE:
         infer_output = ""
         total_count = len(infer_sentences)
         for i, sentence in enumerate(infer_sentences):
-            print(f"\rProgress: {i+1}/{total_count}, sentence: {sentence}", end="")
+            print(f"\rProgress: {i+1}/{total_count}, sentence: {sentence}", end=" ")
             pre_tokenized_sentence = pre_tokenize(sentence)
-            print(f"pre_tokenized_sentence: {pre_tokenized_sentence}", end="\n")
             self.instance_manager.build_instances(pre_tokenized_sentence, is_mp_needed=False, mode="infer")
 
             tokens = []
@@ -124,11 +123,12 @@ class BPE:
             tokens = [token.token_string if not token.is_sub else "##" + token.token_string for token in tokens]
             
             infer_output += " ".join(tokens) + "\n"
+        print("\n")
 
-        print("save tokenized result..., to:", self.tokenized_result_path)
+        print("토크나이즈 결과 저장 중..., to:", self.tokenized_result_path)
         with open(self.tokenized_result_path, "w", encoding="utf-8") as f:
             f.write(infer_output)
-        print("save tokenized result..., to:", self.tokenized_result_path)
+        print("토크나이즈 결과 저장 완료")
 
 if __name__ == "__main__":
     # 테스트 코드

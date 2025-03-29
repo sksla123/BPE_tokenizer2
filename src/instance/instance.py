@@ -217,8 +217,10 @@ class InstanceManager:
                     print("\nReceived keyboard interrupt. Terminating process...")
                     print("Process terminated.")
                     raise  # KeyboardInterrupt를 다시 발생시켜 프로그램 종료
+        
         elif mode == "infer":
-            print(f"instance 개수: {len(instance_words)}", end = "\n")
+            # 디버그용 코드
+            # print(f"instance 개수: {len(instance_words)}", end = "\n")
             for instance_word in instance_words:
                 instance = Instance(instance_word, 1)
                 self.instance_word_to_instance[instance_word] = instance
