@@ -3,7 +3,7 @@ from src.vocab.vocab import Vocabulary
 from src.vocab.merge import MergeRule
 from src.instance.instance import InstanceManager
 from src.token.tokenizer import pre_tokenize
-from src.util.util import load_corpus
+from src.util.util import load_corpus, split_text
 from collections import Counter
 import time
 
@@ -48,114 +48,82 @@ class BPE:
 
         self.instance_manager.build_instances(self.pre_tokenized_corpus, is_mp_needed=False)
         
+        print("vocab 초기화 중...")
         self.initialize_vocab()
+        print("vocab 초기화 완료")
         current_vocab_size = self.vocab.get_vocab_size()
+        print(f"현재 vocab size: {current_vocab_size}")
         
-        for i in range(num_merges):
-            # 가장 빈도가 높은 bigram 쌍 찾기
-            if not self.instance_manager.token_bigram_merge_rules_counter:
-                print(f"No more merge rules available. Stopping at {i} merges.")
-                break
+        print("BPE 학습 중...")
+        train_count = 0
+        start_time = time.time()
+        while current_vocab_size < self.max_vocab_size:
+            self._train()
+            train_count += 1
+            current_vocab_size = self.vocab.get_vocab_size()
+
+            if train_count % 10 == 1:
+                elapsed_time = time.time() - start_time
+                print(f"\r현재 학습 횟수: {train_count} | 현재 vocab size: {current_vocab_size} | 경과 시간: {elapsed_time:.2f}초", end="")
+
+            # 디버깅 코드
+            # for word, is_available in self.instance_manager.tokenize_available_instances.items():
+            #     if is_available:
+            #         print("token list[", word, "]:", [str(token) for token in self.instance_manager.instance_word_to_instance[word].tokens])
                 
-            best_merge_rule = max(
-                self.instance_manager.token_bigram_merge_rules_counter.items(),
-                key=lambda x: x[1]
-            )[0]
-            
-            # 새로운 토큰 생성 및 어휘에 추가
-            new_token = Token(best_merge_rule.token_string, best_merge_rule.is_sub)
-            self.vocab.add_token(new_token)
-            
-            # 인스턴스 업데이트
-            self._apply_merge_rule(best_merge_rule)
-            
-            if (i + 1) % 100 == 0:
-                print(f"Completed {i + 1}/{num_merges} merges")
+            if not self.instance_manager.is_tokenize_available():
+                break
         
+        elapsed_time = time.time() - start_time
+        print(f"\r현재 학습 횟수: {train_count} | 현재 vocab size: {current_vocab_size} | 경과 시간: {elapsed_time:.2f}초")
+
         end_time = time.time()
         print(f"BPE training completed in {end_time - start_time:.2f} seconds")
         print(f"Final vocabulary size: {len(self.vocab.word_tokens) + len(self.vocab.sub_tokens)}")
     
-    def _apply_merge_rule(self, merge_rule: MergeRule):
-        """
-        병합 규칙을 적용하여 인스턴스들을 업데이트합니다.
+    def _train(self):
+        merge_rule, count = self.instance_manager.token_bigram_merge_rules_counter.most_common(1)[0]
         
-        Args:
-            merge_rule (MergeRule): 적용할 병합 규칙
-        """
-        # 병합 규칙이 적용된 인스턴스들을 찾습니다
-        affected_instances = []
-        for instance in self.instance_manager.instance_word_to_instance.values():
-            if merge_rule.token1 in instance.tokens and merge_rule.token2 in instance.tokens:
-                affected_instances.append(instance)
+        f = self.vocab.add_merge_rule(merge_rule, count)
+        if not f:
+            print("\n\n이미 존재하는 merge rule입니다.:", merge_rule, count)
+            self.instance_manager.update_instances(merge_rule.get_merged_token(), self.vocab, verbose=True)
+            os._exit(0)
+
         
-        # 각 인스턴스에 대해 병합 규칙을 적용합니다
-        for instance in affected_instances:
-            # 토큰 리스트에서 병합할 토큰들을 찾아 새로운 토큰으로 교체
-            new_tokens = []
-            i = 0
-            while i < len(instance.tokens):
-                if i < len(instance.tokens) - 1 and instance.tokens[i] == merge_rule.token1 and instance.tokens[i + 1] == merge_rule.token2:
-                    new_token = Token(merge_rule.token_string, merge_rule.is_sub)
-                    new_tokens.append(new_token)
-                    i += 2
-                else:
-                    new_tokens.append(instance.tokens[i])
-                    i += 1
-            
-            # 인스턴스 업데이트
-            instance.tokens = new_tokens
-            instance.update_token_bigram_merge_rules()
-            
-            # 병합 규칙 카운터 업데이트
-            self.instance_manager.token_bigram_merge_rules_counter[merge_rule] = 0
-    
-    def tokenize(self, text: str) -> list[Token]:
-        """
-        학습된 BPE 모델을 사용하여 텍스트를 토큰화합니다.
+        merged_token = merge_rule.get_merged_token()
+
+        self.instance_manager.update_instances(merged_token, self.vocab)
+
+    def save_vocab(self):
+        self.vocab.save_vocab(self.vocab_save_path)
+
+    def infer(self):
+        self.corpus = load_corpus(self.input_data_path)
+        self.vocab.load_vocab(self.infer_vocab_path)
         
-        Args:
-            text (str): 토큰화할 텍스트
+        infer_sentences = split_text(self.corpus)
+
+        infer_output = ""
+        total_count = len(infer_sentences)
+        for i, sentence in enumerate(infer_sentences):
+            print(f"\rProgress: {i+1}/{total_count}, sentence: {sentence}", end="")
+            pre_tokenized_sentence = pre_tokenize(sentence)
+            self.instance_manager.build_instances(pre_tokenized_sentence, is_mp_needed=False, mode="infer")
+
+            tokens = []
+            for pre_token in pre_tokenized_sentence:
+                instance = self.instance_manager.instance_word_to_instance[pre_token]
+                instance.tokenize(self.vocab)
+                tokens.extend(instance.tokens)
+            tokens = [str(token) for token in tokens]
             
-        Returns:
-            list[Token]: 토큰화된 결과
-        """
-        # 1. 텍스트를 단어 단위로 분리
-        words = pre_tokenize(text)
-        
-        # 2. 각 단어에 대해 BPE 토큰화 적용
-        tokens = []
-        for word in words:
-            word_tokens = [Token(c, i != 0) for i, c in enumerate(word)]
-            
-            # 가능한 모든 병합 규칙을 적용
-            while True:
-                # 현재 토큰들 사이의 모든 bigram 쌍을 확인
-                best_merge = None
-                best_merge_rule = None
-                
-                for i in range(len(word_tokens) - 1):
-                    token1 = word_tokens[i]
-                    token2 = word_tokens[i + 1]
-                    merge_rule = MergeRule(token1, token2)
-                    
-                    # 병합 규칙이 어휘에 있는지 확인
-                    if merge_rule.token_string in [t.token_string for t in self.vocab.word_tokens + self.vocab.sub_tokens]:
-                        if best_merge is None or merge_rule.token_string < best_merge.token_string:
-                            best_merge = merge_rule
-                            best_merge_rule = (i, i + 1)
-                
-                if best_merge is None:
-                    break
-                
-                # 가장 좋은 병합 규칙 적용
-                i, j = best_merge_rule
-                new_token = Token(best_merge.token_string, best_merge.is_sub)
-                word_tokens[i:j+1] = [new_token]
-            
-            tokens.extend(word_tokens)
-        
-        return tokens
+            infer_output += " ".join(tokens) + "\n"
+
+        print("save tokenized result..., to:", self.tokenized_result_path)
+        with open(self.tokenized_result_path, "w", encoding="utf-8") as f:
+            f.write(infer_output)
+        print("save tokenized result..., to:", self.tokenized_result_path)
 
 if __name__ == "__main__":
     # 테스트 코드
@@ -164,15 +132,35 @@ if __name__ == "__main__":
     
     # 코퍼스 로드
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    corpus_path = os.path.join(current_dir, "..", "..", "data", "pg100.txt")
-    corpus = load_corpus(corpus_path)
+    corpus_path = os.path.join(current_dir, "..", "..", "data", "train", "pg100.txt")
+    vocab_save_path = os.path.join(current_dir, "..", "..", "data", "vocab", "test_vocab.json")
+    input_data_path = os.path.join(current_dir, "..", "..", "data", "infer", "input", "input.txt")
+    output_data_path = os.path.join(current_dir, "..", "..", "data", "infer", "output", "output_test1.txt")
     
     # BPE 모델 학습
-    bpe = BPE(vocab_size=1000)
-    bpe.train(corpus, is_mp_needed=False)
-    
+    config_data = {
+        "train_corpus_path": corpus_path,
+        "vocab_output_path": vocab_save_path,
+        "max_vocab": 10000
+    }
+    bpe = BPE(config_data)
+    bpe.train()
+    bpe.vocab.save_vocab(bpe.vocab_save_path)
+
+    print("vocab size:", bpe.vocab.get_vocab_size())
+    print("vocab word size:", len(bpe.vocab.word_tokens))
+    print("vocab sub size:", len(bpe.vocab.sub_tokens))
+    print("vocab merge rules size:", len(bpe.vocab.merge_rules))
+
     # 테스트 텍스트 토큰화
-    test_text = "Hello, world!"
-    tokens = bpe.tokenize(test_text)
-    print(f"Original text: {test_text}")
-    print(f"Tokenized: {' '.join(str(t) for t in tokens)}")
+    test_text = "The man is thinking of me"
+
+    config_data = {
+        "input_data_path": input_data_path,
+        "infer_vocab_path": vocab_save_path,
+        "tokenized_result_path": output_data_path
+    }
+
+    bpe = BPE(config_data)
+    bpe.infer()
+    

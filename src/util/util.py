@@ -1,4 +1,5 @@
 import re
+import pprint
 
 def load_corpus(corpus_path: str) -> str:
     '''
@@ -13,3 +14,17 @@ def load_corpus(corpus_path: str) -> str:
         corpus = corpus.lstrip("\ufeff")
     
     return corpus
+
+def split_text(text: str) -> list[str]:
+    return re.split(r'\n', text)
+
+def get_indent(data: dict) -> int:
+    pretty_str = pprint.pformat(data)
+    indent = 0
+
+    for line in pretty_str.split('\n'):
+        _indent = len(line) - len(line.lstrip())
+        if _indent > indent:
+            indent = _indent
+
+    return indent
