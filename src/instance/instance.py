@@ -4,16 +4,62 @@ from src.vocab.merge import MergeRule
 from collections import Counter
 
 import multiprocessing as mp
+from multiprocessing import Pool
 import time
+import os
 
 def build_instance(instance_tuple: tuple[str, int]):
     instance_word, instance_count = instance_tuple
     return Instance(instance_word, instance_count)
 
+def progress_monitor(progress_dict: dict, total_instances: int, start_time: float):
+    last_print_time = start_time
+    while True:
+        current_time = time.time()
+        if current_time - last_print_time >= 2:
+            # 모든 슬레이브의 진행 상황을 수집
+            progress_lines = []
+            total_processed = 0
+            for pid, (processed, total) in progress_dict.items():
+                progress_lines.append(f"Slave {pid}: {processed}/{total}")
+                total_processed += processed
+            
+            # 진행 상황 출력
+            elapsed = current_time - start_time
+            progress_str = ", ".join(progress_lines)
+            
+            # 한 줄에 모든 정보 출력
+            print("\033[2K", end="\r")  # 현재 라인 지우기
+            print(f"Progress: {total_processed}/{total_instances} instances built. Elapsed: {elapsed:.2f} seconds | Status: {progress_str}", end="\r")
+            
+            # 모든 인스턴스가 빌드되었다면 종료
+            if total_processed >= total_instances:
+                print("\n")  # 마지막 출력 후 줄바꿈
+                break
+            
+            last_print_time = current_time
+        time.sleep(0.1)
+
+def single_process_monitor(total_instances: int, start_time: float):
+    last_print_time = start_time
+    processed = 0
+    
+    while processed < total_instances:
+        current_time = time.time()
+        if current_time - last_print_time >= 2:
+            elapsed = current_time - start_time
+            print("\033[2K", end="\r")  # 현재 라인 지우기
+            print(f"Progress: {processed}/{total_instances} instances built. Elapsed: {elapsed:.2f} seconds", end="\r")
+            last_print_time = current_time
+        time.sleep(0.1)
+    
+    print("\n")  # 마지막 출력 후 줄바꿈
+
 class Instance:
     def __init__(self, instance_word: str, instance_count: int):
         self.word = instance_word
         self.tokens = []
+        
         self.instance_count = instance_count
         
         # initialize token
@@ -22,7 +68,7 @@ class Instance:
             self.tokens.append(subword_token)
 
         ## 맨 처음 부터 초기화하면서 본인이 만들 수 있는 모든 merge rule 후보를 생성함
-        self.token_subwords_candidates = set() ### 역인덱싱용
+        self.token_candidates_pool = set() ### 역인덱싱용
         self.init_subwords_candidates()
 
         # 현재 토큰 기준 만들 수 있는 bigram 쌍 카운터
@@ -31,7 +77,7 @@ class Instance:
         self.update_token_bigram_merge_rules() ### 현재 토큰 기반으로 생성 가능한 bigram 쌍을 검색하고 카운터 업데이트
     
     def init_subwords_candidates(self):
-        self.token_subwords_candidates = set()
+        self.token_candidates_pool = set()
         word_len = len(self.word)
         # 모든 가능한 연속된 substring 후보 생성 (길이 2 이상)
         for subword_len in range(2, word_len + 1):
@@ -39,7 +85,7 @@ class Instance:
                 substring = self.word[start_idx:start_idx+subword_len]
                 # 시작 인덱스가 0이면 단어의 첫 토큰, 아니면 subword로 취급
                 candidate_token = Token(substring, is_sub=(start_idx != 0))
-                self.token_subwords_candidates.add(candidate_token)
+                self.token_candidates_pool.add(candidate_token)
 
     def update_token_bigram_merge_rules(self):
         for i in range(len(self.tokens)-1):
@@ -69,49 +115,80 @@ class InstanceManager:
         self.token_bigram_merge_rules_counter = Counter()
 
     def build_instances(self, instance_words: list[str], is_mp_needed: bool = False):
-        _instance_words = set(instance_words)
+        instance_words_counter = Counter(instance_words)
+        total = len(instance_words_counter.keys())
+        print(f"total instance 개수: {sum(instance_words_counter.values())}")
+        start_time = time.time()
+        
         if is_mp_needed:
             num_proc = max(mp.cpu_count() - 1, 1)
-            total = len(instance_words)
-            processed = 0
-
+            
             print(f"Using {num_proc} processes for building {total} instances.")
-            global_start_time = time.time()
-            last_print_time = time.time()
+            
+            try:
+                # Pool을 사용하여 병렬 처리
+                with Pool(processes=num_proc) as pool:
+                    results = pool.map(build_instance, instance_words_counter.items())
+                
+                print(f"Built {len(results)} instances.")
+                
+                # 결과 처리
+                print("Processing results... (멀티 프로세싱 오버헤드 처리 단계)")
+                processed_count = 0
+                for instance in results:
+                    self.instance_word_to_instance[instance.word] = instance
+                    for subword in instance.token_candidates_pool:
+                        if subword not in self.subword_to_instance:
+                            self.subword_to_instance[subword] = []
+                        self.subword_to_instance[subword].append(instance)
+                    self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
+                    processed_count += 1
+                    if processed_count % 1000 == 0:  # 1000개마다 진행 상황 출력
+                        print(f"\rProcessing results: {processed_count}/{len(results)}", end="", flush=True)
+                print("\n")
+                
+                end_time = time.time()
+                print(f"Multiprocessing completed in {end_time - start_time:.2f} seconds")
+            
+            except KeyboardInterrupt:
+                print("\nReceived keyboard interrupt. Terminating processes...")
+                print("Processes terminated.")
+                raise  # KeyboardInterrupt를 다시 발생시켜 프로그램 종료
+        else:
+            print(f"Using single process for building {total} instances.")
+            
+            try:
+                # 단일 프로세스로 처리
+                processed = 0
+                last_print_time = start_time
+                
+                for instance_word, instance_count in instance_words_counter.items():
+                    instance = Instance(instance_word, instance_count)
+                    self.instance_word_to_instance[instance_word] = instance
 
-            with mp.Pool(processes=num_proc) as pool:
-                results = []
-                for instance in pool.imap_unordered(build_instance, instance_words):
-                    results.append(instance)
+                    for subword in instance.token_candidates_pool:
+                        if subword not in self.subword_to_instance:
+                            self.subword_to_instance[subword] = []
+                        self.subword_to_instance[subword].append(instance)
+                    self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
+                    
+                    # 진행 상황 출력
                     processed += 1
                     current_time = time.time()
-                    # 2초마다 진행 상황 업데이트 (전체 경과 시간 포함)
                     if current_time - last_print_time >= 2:
-                        elapsed = current_time - global_start_time
-                        print(f"\rProgress: {processed}/{total} instances built. Elapsed: {elapsed:.2f} seconds", end="", flush=True)
+                        elapsed = current_time - start_time
+                        print("\033[2K", end="\r")  # 현재 라인 지우기
+                        print(f"Progress: {processed}/{total} instances built. Elapsed: {elapsed:.2f} seconds", end="\r")
                         last_print_time = current_time
-
-            print()
+                
+                print("\n")  # 마지막 출력 후 줄바꿈
+                end_time = time.time()
+                print(f"Single processing completed in {end_time - start_time:.2f} seconds")
             
-            # mp 오버헤드
-            for instance in results:
-                self.instance_word_to_instance[instance.word] = instance
-                for subword in instance.token_subwords_candidates:
-                    if subword not in self.subword_to_instance:
-                        self.subword_to_instance[subword] = []
-                    self.subword_to_instance[subword].append(instance)
-                self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
-        else:
-            # 단일 프로세스로 처리
-            for instance_word in instance_words:
-                instance = Instance(instance_word)
-                self.instance_word_to_instance[instance_word] = instance
-
-                for subword in instance.token_subwords_candidates:
-                    if subword not in self.subword_to_instance:
-                        self.subword_to_instance[subword] = []
-                    self.subword_to_instance[subword].append(instance)
-                self.token_bigram_merge_rules_counter.update(instance.token_bigram_merge_rules_counter)
+            except KeyboardInterrupt:
+                print("\nReceived keyboard interrupt. Terminating process...")
+                print("Process terminated.")
+                raise  # KeyboardInterrupt를 다시 발생시켜 프로그램 종료
 
 if __name__ == "__main__":
     ## test 1
@@ -127,13 +204,18 @@ if __name__ == "__main__":
     from src.util.util import load_corpus
     import os
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    print("현재 프로그램의 폴더 경로:", current_dir)
     
     corpus_path = os.path.join(current_dir, "..", "..", "data", "pg100.txt")
     corpus = load_corpus(corpus_path)
     
     from src.token.tokenizer import pre_tokenize
     tokenized_instances = pre_tokenize(corpus)
+    print(f"pre tokenized instance 개수: {len(tokenized_instances)}")
+    print(f"set 적용 후 instance 개수: {len(set(tokenized_instances))}")
 
     instance_manager = InstanceManager(tokenized_instances)
-    instance_manager.build_instances(tokenized_instances, is_mp_needed=True)
+    # 멀티 프로세싱 사용
+    # instance_manager.build_instances(tokenized_instances, is_mp_needed=True)
+    # 멀티 프로세싱 사용 안함 
+    ### 비교실험 해봤는데 70000개 기준 멀티 프로세싱 사용 안할때 더 빠름
+    instance_manager.build_instances(tokenized_instances, is_mp_needed=False)

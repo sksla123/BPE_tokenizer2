@@ -1,4 +1,7 @@
 import re
+from src.instance.instance import Instance
+from src.vocab.vocab import Vocabulary
+
 
 def pre_tokenize(corpus: str, method: str = "whitespace"):
     '''
@@ -18,3 +21,5 @@ def pre_tokenize(corpus: str, method: str = "whitespace"):
         return ret
     else:
         raise ValueError(f"지원하지 않는 pre-tokenize 방법입니다. {method}\n 지원하는 메소드 목록: [whitespace]")
+
+def tokenize():
