@@ -69,12 +69,22 @@ class Instance:
         return self.token_bigram_merge_rules_counter
 
     def tokenize(self, vocab: Vocabulary, verbose: bool = False):
-        candidate_tokens = self.subword_candidates_pool
+        if verbose:
+            candidate_tokens = self.subword_candidates_pool
+            print(f"candidate_tokens: {[str(token) for token in candidate_tokens]}", end="\n")
 
-        merge_rules_counter = vocab.get_merge_rules_counter(candidate_tokens)
-        self.tokens = tokenize_by_merge_rules(self.word, merge_rules_counter, verbose)
+            merge_rules_counter = vocab.get_merge_rules_counter(candidate_tokens)
+            print(f"merge_rules_counter: {Counter({str(key): merge_rules_counter[key] for key in merge_rules_counter})}", end="\n")
+            self.tokens = tokenize_by_merge_rules(self.word, merge_rules_counter, verbose)
 
-        self.update_token_bigram_merge_rules()
+            self.update_token_bigram_merge_rules()
+        else:
+            candidate_tokens = self.subword_candidates_pool
+
+            merge_rules_counter = vocab.get_merge_rules_counter(candidate_tokens)
+            self.tokens = tokenize_by_merge_rules(self.word, merge_rules_counter, verbose)
+
+            self.update_token_bigram_merge_rules()
 
 class InstanceManager:
     def __init__(self):
@@ -127,12 +137,11 @@ class InstanceManager:
                 self.tokenize_available_instances[instance.word] = len(instance.tokens) > 1
 
     def build_instances(self, instance_words: list[str], is_mp_needed: bool = False, mode: str = "train"):
-        instance_words_counter = Counter(instance_words)
-        total = len(instance_words_counter.keys())
-        print(f"total instance 개수: {sum(instance_words_counter.values())}")
-        start_time = time.time()
-        
         if mode == "train":
+            instance_words_counter = Counter(instance_words)
+            total = len(instance_words_counter.keys())
+            print(f"total instance 개수: {sum(instance_words_counter.values())}")
+            start_time = time.time()
             if is_mp_needed:
                 pass
                 # num_proc = max(mp.cpu_count() - 1, 1)
@@ -209,6 +218,7 @@ class InstanceManager:
                     print("Process terminated.")
                     raise  # KeyboardInterrupt를 다시 발생시켜 프로그램 종료
         elif mode == "infer":
+            print(f"instance 개수: {len(instance_words)}", end = "\n")
             for instance_word in instance_words:
                 instance = Instance(instance_word, 1)
                 self.instance_word_to_instance[instance_word] = instance

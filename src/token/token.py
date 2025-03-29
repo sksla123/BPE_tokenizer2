@@ -4,7 +4,7 @@ class Token:
         self.is_sub = is_sub
 
     def __str__(self):
-        return self.token_string if not self.is_sub else f"##{self.token_string}"
+        return self.token_string if not self.is_sub else f"[ sub ]{self.token_string}"
     
     def __hash__(self):
         return hash(self.token_string)

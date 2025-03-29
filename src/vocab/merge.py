@@ -13,7 +13,7 @@ class MergeRule(Token):
         return self.merged_token
 
     def __str__(self):
-        return f"{str(self.token1)} {str(self.token2)} {str(self.token_string)}"
+        return f"{str(self.token1)}\t{str(self.token2)}\t{str(self.token_string)}"
     
     def __hash__(self):
         return hash((self.token1, self.token2))

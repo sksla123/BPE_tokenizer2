@@ -16,7 +16,10 @@ def load_corpus(corpus_path: str) -> str:
     return corpus
 
 def split_text(text: str) -> list[str]:
-    return re.split(r'\n', text)
+    ret = re.split(r'\n', text)
+    while "" in ret:
+        ret.remove("")
+    return ret
 
 def get_indent(data: dict) -> int:
     pretty_str = pprint.pformat(data)

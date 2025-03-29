@@ -98,9 +98,11 @@ class BPE:
     def save_vocab(self):
         self.vocab.save_vocab(self.vocab_save_path)
 
+    def load_vocab(self):
+        self.vocab.load_vocab(self.infer_vocab_path)
+
     def infer(self):
         self.corpus = load_corpus(self.input_data_path)
-        self.vocab.load_vocab(self.infer_vocab_path)
         
         infer_sentences = split_text(self.corpus)
 
@@ -109,14 +111,17 @@ class BPE:
         for i, sentence in enumerate(infer_sentences):
             print(f"\rProgress: {i+1}/{total_count}, sentence: {sentence}", end="")
             pre_tokenized_sentence = pre_tokenize(sentence)
+            print(f"pre_tokenized_sentence: {pre_tokenized_sentence}", end="\n")
             self.instance_manager.build_instances(pre_tokenized_sentence, is_mp_needed=False, mode="infer")
 
             tokens = []
             for pre_token in pre_tokenized_sentence:
                 instance = self.instance_manager.instance_word_to_instance[pre_token]
+                # 디버그용 코드
+                # instance.tokenize(self.vocab, verbose=True)
                 instance.tokenize(self.vocab)
                 tokens.extend(instance.tokens)
-            tokens = [str(token) for token in tokens]
+            tokens = [token.token_string if not token.is_sub else "##" + token.token_string for token in tokens]
             
             infer_output += " ".join(tokens) + "\n"
 
@@ -133,27 +138,25 @@ if __name__ == "__main__":
     # 코퍼스 로드
     current_dir = os.path.dirname(os.path.abspath(__file__))
     corpus_path = os.path.join(current_dir, "..", "..", "data", "train", "pg100.txt")
-    vocab_save_path = os.path.join(current_dir, "..", "..", "data", "vocab", "test_vocab.json")
+    vocab_save_path = os.path.join(current_dir, "..", "..", "data", "vocab", "vocab.json")
     input_data_path = os.path.join(current_dir, "..", "..", "data", "infer", "input", "input.txt")
-    output_data_path = os.path.join(current_dir, "..", "..", "data", "infer", "output", "output_test1.txt")
+    output_data_path = os.path.join(current_dir, "..", "..", "data", "infer", "output", "output.txt")
     
     # BPE 모델 학습
-    config_data = {
-        "train_corpus_path": corpus_path,
-        "vocab_output_path": vocab_save_path,
-        "max_vocab": 10000
-    }
-    bpe = BPE(config_data)
-    bpe.train()
-    bpe.vocab.save_vocab(bpe.vocab_save_path)
+    # config_data = {
+    #     "train_corpus_path": corpus_path,
+    #     "vocab_output_path": vocab_save_path,
+    #     "max_vocab": 30000
+    # }
+    # bpe = BPE(config_data)
+    # bpe.train()
+    # bpe.vocab.save_vocab(bpe.vocab_save_path)
 
-    print("vocab size:", bpe.vocab.get_vocab_size())
-    print("vocab word size:", len(bpe.vocab.word_tokens))
-    print("vocab sub size:", len(bpe.vocab.sub_tokens))
-    print("vocab merge rules size:", len(bpe.vocab.merge_rules))
 
-    # 테스트 텍스트 토큰화
-    test_text = "The man is thinking of me"
+    # print("vocab size:", bpe.vocab.get_vocab_size())
+    # print("vocab word size:", len(bpe.vocab.word_tokens))
+    # print("vocab sub size:", len(bpe.vocab.sub_tokens))
+    # print("vocab merge rules size:", len(bpe.vocab.merge_rules))
 
     config_data = {
         "input_data_path": input_data_path,
@@ -162,5 +165,13 @@ if __name__ == "__main__":
     }
 
     bpe = BPE(config_data)
+    bpe.load_vocab()
+
+    print("vocab size:", bpe.vocab.get_vocab_size())
+    print("vocab word size:", len(bpe.vocab.word_tokens))
+    print("vocab sub size:", len(bpe.vocab.sub_tokens))
+    print("vocab merge rules size:", len(bpe.vocab.merge_rules))
+    # os._exit(0)
+
     bpe.infer()
     

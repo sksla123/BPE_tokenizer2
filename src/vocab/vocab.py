@@ -60,7 +60,7 @@ class Vocabulary:
             dict_data = {
                 "word_vocab": [str(token) for token in self.word_tokens],
                 "sub_vocab": [str(token) for token in self.sub_tokens],
-                "merge_rules": [str(merge_rule) + " " + str(self.merge_rules_counter[merge_rule.get_merged_token()]) for merge_rule in self.merge_rules]
+                "merge_rules": [str(merge_rule) + '\t' + str(self.merge_rules_counter[merge_rule.get_merged_token()]) for merge_rule in self.merge_rules]
             }
             
             indent = get_indent(dict_data)
@@ -78,11 +78,29 @@ class Vocabulary:
             self.vocab_size = len(self.tokens)
 
             for str_merge_rule in dict_data["merge_rules"]:
-                _str_merge_rule = str_merge_rule.split(" ")
-                token1 = Token(_str_merge_rule[0], is_sub=False)
-                token2 = Token(_str_merge_rule[1], is_sub=False)
+                _str_merge_rule = str_merge_rule.split("\t")
+                
+                if _str_merge_rule[0].startswith("[ sub ]"):
+                    token1 = Token(_str_merge_rule[0][7:], is_sub=True)
+                else:
+                    token1 = Token(_str_merge_rule[0], is_sub=False)
+
+                if _str_merge_rule[1].startswith("[ sub ]"):
+                    token2 = Token(_str_merge_rule[1][7:], is_sub=True)
+                else:
+                    token2 = Token(_str_merge_rule[1], is_sub=False)
 
                 merge_rule = MergeRule(token1, token2)
+                
+                # 디버그 용 코드
+                # print(f"merge_rule: {str(merge_rule)}, count: {int(_str_merge_rule[3])}")
+                
                 self.add_merge_rule(merge_rule, int(_str_merge_rule[3]))
         
+        # 디버그 용 코드
+        # import os
+        # with open("./vocab_debug.txt", "w", encoding="utf-8") as f:
+        #     f.write(f"merge_rules_counter: {Counter({str(key): self.merge_rules_counter[key] for key in self.merge_rules_counter})}")
+        # os._exit(0)
+
         print("vocab 로드 완료")
